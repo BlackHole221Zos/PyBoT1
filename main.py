@@ -3,10 +3,15 @@ import aiohttp
 from aiogram import Bot, Dispatcher, types
 from aiogram.types import Message
 
-# Укажите ваш токен бота, API Key и Search Engine ID
+
+
+# токены 
 BOT_TOKEN = '7141735821:AAFDkmNQByppo_g05PvQcihwrmKVVGX0ajg'
+# для фото
 GOOGLE_API_KEY = 'AIzaSyABP6N_DVSI8CnvWDCJZVRZswY3Idn-R-E'
 GOOGLE_SEARCH_ENGINE_ID = 'b205be29cb0a345ce'
+
+
 
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
