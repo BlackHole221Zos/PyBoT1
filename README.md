@@ -36,31 +36,23 @@
 Требования:
 Python 3.7 или выше
 
-Установленные библиотеки: aiogram, aiohttp
+Установленные библиотеки (см. ниже)
 
 Установка:
 Клонируйте репозиторий:
 
-bash
-Copy
-git clone https://github.com/yourusername/telegram-multifunctional-bot.git
-cd telegram-multifunctional-bot
-Установите необходимые зависимости:
+git clone https://github.com/yourusername/telegram-bot.git
+cd telegram-bot
+Установите необходимые библиотеки:
 
-bash
-Copy
-pip install -r requirements.txt
+pip install aiogram aiohttp requests beautifulsoup4
 Создайте файл .env и добавьте туда ваши токены:
 
-plaintext
-Copy
 BOT_TOKEN=ваш_токен_бота
 GOOGLE_API_KEY=ваш_google_api_ключ
 GOOGLE_SEARCH_ENGINE_ID=ваш_идентификатор_поисковой_системы
 Запустите бота:
 
-bash
-Copy
 python bot.py
 Логирование
 Бот логирует все входящие сообщения и действия пользователя в консоль, что помогает отслеживать его работу и находить возможные ошибки.
