@@ -13,7 +13,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 # Конфигурация бота
-BOT_TOKEN = '7761632211:AAHHq5P9SHI-FnZcqsckZ90mOL3ZbCZUL5s'
+BOT_TOKEN = 'YOUR_BOT_TOKEN'
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
