@@ -87,7 +87,7 @@ pip install -r requirements.txt
 Запустите бота с помощью команды:
 
 ```bash
-python main.py
+python bot.py
 ```
 
 ### 7. Проверка работы
