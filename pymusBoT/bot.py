@@ -13,7 +13,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 # Конфигурация бота
-BOT_TOKEN = 'ваш токен'
+BOT_TOKEN = 'ВАШ_ТОКЕН_БОТАs'
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
@@ -22,16 +22,26 @@ search_results = {}  # Результаты поиска
 current_index = {}   # Текущий индекс результата
 search_type = {}     # Тип поиска (видео или музыка)
 cooldowns = {}       # Кулдаун для чатов
+search_history = {}  # История запросов
+
+# Функция для обновления истории запросов
+def update_search_history(chat_id: int, query: str):
+    if chat_id not in search_history:
+        search_history[chat_id] = []
+    search_history[chat_id].append(query)
+    # Ограничим историю последними 10 запросами
+    if len(search_history[chat_id]) > 10:
+        search_history[chat_id] = search_history[chat_id][-10:]
 
 # Клавиатуры
 def get_start_keyboard():
-    return ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="Начать")]], resize_keyboard=True)
-
-def get_search_type_keyboard():
     return ReplyKeyboardMarkup(
         keyboard=[
+            [KeyboardButton(text="▶️ Начать")],
             [KeyboardButton(text="🎥 Искать видео на Rutube")],
-            [KeyboardButton(text="🎵 Искать музыку на Bandcamp")]
+            [KeyboardButton(text="🎵 Искать музыку на Bandcamp")],
+            [KeyboardButton(text="📜 История запросов")],
+            [KeyboardButton(text="🏠 Главное меню")]
         ],
         resize_keyboard=True
     )
@@ -41,6 +51,9 @@ def get_search_keyboard():
         [
             InlineKeyboardButton(text="Искать ещё", callback_data="search_more"),
             InlineKeyboardButton(text="Искать другую песню", callback_data="new_search")
+        ],
+        [
+            InlineKeyboardButton(text="Не хочу искать", callback_data="stop_search")
         ]
     ])
 
@@ -73,7 +86,32 @@ async def search_music(query: str):
 # Обработчик команды /start
 @dp.message(Command("start"))
 async def send_welcome(message: types.Message):
-    await message.answer("Привет! Я музыкальный бот. Выбери, что ты хочешь искать:", reply_markup=get_search_type_keyboard())
+    await message.answer(
+        "Привет! Я музыкальный бот. Нажми «▶️ Начать», чтобы выбрать тип поиска.",
+        reply_markup=get_start_keyboard()
+    )
+
+# Обработчик кнопки "Начать"
+@dp.message(lambda message: message.text == "▶️ Начать")
+async def handle_start(message: types.Message):
+    await message.answer(
+        "Выбери, что ты хочешь искать:",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[
+                [KeyboardButton(text="🎥 Искать видео на Rutube")],
+                [KeyboardButton(text="🎵 Искать музыку на Bandcamp")]
+            ],
+            resize_keyboard=True
+        )
+    )
+
+# Обработчик кнопки "Главное меню"
+@dp.message(lambda message: message.text == "🏠 Главное меню")
+async def handle_main_menu(message: types.Message):
+    await message.answer(
+        "Вы вернулись в главное меню.",
+        reply_markup=get_start_keyboard()
+    )
 
 # Обработчик выбора типа поиска
 @dp.message(lambda message: message.text in ["🎥 Искать видео на Rutube", "🎵 Искать музыку на Bandcamp"])
@@ -82,7 +120,7 @@ async def handle_search_type(message: types.Message):
     search_type[chat_id] = "video" if message.text == "🎥 Искать видео на Rutube" else "music"
     await message.answer(
         f"Отлично! Теперь я буду искать {'видео на Rutube' if search_type[chat_id] == 'video' else 'музыку на Bandcamp'}. Введи название песни или исполнителя Пример The Rolling Stones Paint It, Black:",
-        reply_markup=types.ReplyKeyboardRemove()
+        reply_markup=get_start_keyboard()
     )
 
 # Обработчик текстовых сообщений
@@ -91,13 +129,26 @@ async def handle_message(message: types.Message):
     chat_id = message.chat.id
     query = message.text.strip()
 
-    if query.lower() == "начать":
-        await send_welcome(message)
+    if query == "📜 История запросов":
+        if chat_id in search_history and search_history[chat_id]:
+            history_text = "Недавно вы искали:\n"
+            for i, query in enumerate(search_history[chat_id], 1):
+                history_text += f"{i}. {query}\n"
+            await message.answer(history_text)
+        else:
+            await message.answer("Вы ещё ничего не искали.")
+        return
+
+    if query == "🏠 Главное меню":
+        await handle_main_menu(message)
         return
 
     if chat_id not in search_type:
-        await message.answer("Сначала выбери тип поиска: видео или музыку.", reply_markup=get_search_type_keyboard())
+        await message.answer("Сначала выбери тип поиска: видео или музыку.", reply_markup=get_start_keyboard())
         return
+
+    # Добавляем запрос в историю
+    update_search_history(chat_id, query)
 
     results = await (search_video(query) if search_type[chat_id] == "video" else search_music(query))
 
@@ -160,6 +211,25 @@ async def handle_new_search(callback: types.CallbackQuery):
     cooldowns[chat_id] = datetime.now() + timedelta(seconds=5)
     await callback.answer("Нажимайте!")
     await callback.message.answer("Введите название песни или исполнителя для нового поиска. Пример The Rolling Stones Paint It, Black:", reply_markup=get_start_keyboard())
+
+# Обработчик кнопки "Не хочу искать"
+@dp.callback_query(lambda callback: callback.data == "stop_search")
+async def handle_stop_search(callback: types.CallbackQuery):
+    chat_id = callback.message.chat.id
+
+    # Очищаем данные пользователя
+    if chat_id in search_results:
+        del search_results[chat_id]
+    if chat_id in current_index:
+        del current_index[chat_id]
+    if chat_id in search_type:
+        del search_type[chat_id]
+
+    await callback.answer("Поиск завершён.")
+    await callback.message.answer(
+        "Хорошо, поиск завершён. Если захочешь искать что-то ещё, просто нажми «▶️ Начать».",
+        reply_markup=get_start_keyboard()
+    )
 
 # Запуск бота
 async def main():
