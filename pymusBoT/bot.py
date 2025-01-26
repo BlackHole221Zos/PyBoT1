@@ -6,21 +6,22 @@ import aiohttp
 from bs4 import BeautifulSoup
 import logging
 import asyncio
-from datetime import datetime, timedelta
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# Конфигурация бота
+# Токен бота
 BOT_TOKEN = 'ВАШ_ТОКЕН_БОТА'
+
+# Инициализация бота и диспетчера
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Глобальные переменные для хранения данных
-user_data = {}  # Храним данные пользователей в одном словаре
+# Словарь для хранения данных пользователей
+user_data = {}
 
-# Функция для обновления истории запросов
+# Функция для сохранения запросов пользователя
 def save_user_query(chat_id: int, query: str):
     if chat_id not in user_data:
         user_data[chat_id] = {"history": [], "results": [], "index": 0, "type": None}
@@ -29,11 +30,19 @@ def save_user_query(chat_id: int, query: str):
     if len(user_data[chat_id]["history"]) > 10:
         user_data[chat_id]["history"] = user_data[chat_id]["history"][-10:]
 
-# Клавиатуры
+# Создание клавиатуры для старта (только кнопка "Начать")
+def create_start_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="▶️ Начать")]
+        ],
+        resize_keyboard=True
+    )
+
+# Создание основной клавиатуры
 def create_main_menu():
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="▶️ Начать")],
             [KeyboardButton(text="🎥 Видео на Rutube"), KeyboardButton(text="🎵 Музыка на Bandcamp")],
             [KeyboardButton(text="📜 История"), KeyboardButton(text="❌ Очистить историю")],
             [KeyboardButton(text="🏠 Главное меню")]
@@ -41,6 +50,16 @@ def create_main_menu():
         resize_keyboard=True
     )
 
+# Создание клавиатуры только с кнопкой "Главное меню"
+def create_menu_only_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="🏠 Главное меню")]
+        ],
+        resize_keyboard=True
+    )
+
+# Создание клавиатуры для поиска
 def create_search_buttons():
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -85,22 +104,19 @@ async def start_bot(message: types.Message):
     username = message.from_user.username
     greeting = f"Привет, {name}!" + (f" (@{username})" if username else "")
     await message.answer(greeting)
-    await message.answer("Я бот для поиска видео и музыки. Нажми «▶️ Начать», чтобы выбрать тип поиска.", reply_markup=create_main_menu())
+    await message.answer("Я бот для поиска видео и музыки. Нажми «▶️ Начать», чтобы выбрать тип поиска.)", reply_markup=create_start_keyboard())
 
 # Обработчик кнопки "Начать"
 @dp.message(lambda message: message.text == "▶️ Начать")
 async def start_search(message: types.Message):
-    await message.answer("Выбери, что ты хочешь искать:", reply_markup=ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="🎥 Видео на Rutube"), KeyboardButton(text="🎵 Музыка на Bandcamp")]
-        ],
-        resize_keyboard=True
-    ))
+    await message.answer("Выбери, что ты хочешь искать:", reply_markup=create_main_menu())
 
 # Обработчик кнопки "Главное меню"
 @dp.message(lambda message: message.text == "🏠 Главное меню")
 async def return_to_menu(message: types.Message):
     await message.answer("Вы вернулись в главное меню.", reply_markup=create_main_menu())
+
+
 
 # Обработчик выбора типа поиска
 @dp.message(lambda message: message.text in ["🎥 Видео на Rutube", "🎵 Музыка на Bandcamp"])
@@ -109,7 +125,10 @@ async def choose_search_type(message: types.Message):
     if chat_id not in user_data:
         user_data[chat_id] = {"history": [], "results": [], "index": 0, "type": None}
     user_data[chat_id]["type"] = "video" if message.text == "🎥 Видео на Rutube" else "music"
-    await message.answer(f"Отлично! Теперь я буду искать {'видео на Rutube' if user_data[chat_id]['type'] == 'video' else 'музыку на Bandcamp'}. Введи запрос:", reply_markup=create_main_menu())
+    await message.answer(
+        f"Отлично! Теперь я буду искать {'видео на Rutube' if user_data[chat_id]['type'] == 'video' else 'музыку на Bandcamp'}. Введи запрос:",
+        reply_markup=create_menu_only_keyboard()  # Только кнопка "Главное меню"
+    )
 
 # Обработчик текстовых сообщений
 @dp.message()
@@ -125,7 +144,7 @@ async def process_query(message: types.Message):
             await message.answer("История запросов пуста.")
         return
 
-    if query == "❌ Очистить историю":  # Обработчик для очистки истории
+    if query == "❌ Очистить историю":
         if chat_id in user_data:
             user_data[chat_id]["history"] = []
             await message.answer("История запросов очищена.", reply_markup=create_main_menu())
@@ -168,6 +187,8 @@ async def show_result(chat_id: int, message: types.Message = None):
     else:
         await bot.send_message(chat_id, text, parse_mode=ParseMode.HTML, reply_markup=create_search_buttons())
 
+
+
 # Обработчик кнопки "Искать ещё"
 @dp.callback_query(lambda callback: callback.data == "more")
 async def next_result(callback: types.CallbackQuery):
@@ -194,6 +215,8 @@ async def new_search(callback: types.CallbackQuery):
     await callback.answer("Начни новый поиск.")
     await callback.message.answer("Введи новый запрос:", reply_markup=create_main_menu())
 
+
+
 # Обработчик кнопки "Закончить"
 @dp.callback_query(lambda callback: callback.data == "stop")
 async def stop_search(callback: types.CallbackQuery):
@@ -201,7 +224,11 @@ async def stop_search(callback: types.CallbackQuery):
     user_data[chat_id]["results"] = []
     user_data[chat_id]["index"] = 0
     await callback.answer("Поиск завершён.")
-    await callback.message.answer("Поиск остановлен. Нажми «▶️ Начать», чтобы начать заново.", reply_markup=create_main_menu())
+    await callback.message.answer("Поиск остановлен. Выбери что - то: ", reply_markup=create_main_menu())
+
+
+
+
 
 # Запуск бота
 async def run_bot():
