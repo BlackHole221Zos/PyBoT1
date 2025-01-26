@@ -29,7 +29,6 @@ def update_search_history(chat_id: int, query: str):
     if chat_id not in search_history:
         search_history[chat_id] = []
     search_history[chat_id].append(query)
-    # Ограничим историю последними 10 запросами
     if len(search_history[chat_id]) > 10:
         search_history[chat_id] = search_history[chat_id][-10:]
 
@@ -86,14 +85,30 @@ async def search_music(query: str):
 # Обработчик команды /start
 @dp.message(Command("start"))
 async def send_welcome(message: types.Message):
+    user_name = message.from_user.first_name
+    user_username = message.from_user.username
+
+    greeting = f"Привет, {user_name}!"
+    if user_username:
+        greeting += f" (@{user_username})"
+
+    await message.answer(greeting)
     await message.answer(
-        "Привет! Я музыкальный бот. Нажми «▶️ Начать», чтобы выбрать тип поиска.",
+        "Я новый музыкальный бот. Нажми «▶️ Начать», чтобы выбрать тип поиска.",
         reply_markup=get_start_keyboard()
     )
 
 # Обработчик кнопки "Начать"
 @dp.message(lambda message: message.text == "▶️ Начать")
 async def handle_start(message: types.Message):
+    user_name = message.from_user.first_name
+    user_username = message.from_user.username
+
+    greeting = f"Привет, {user_name}!"
+    if user_username:
+        greeting += f" (@{user_username})"
+
+    await message.answer(greeting)
     await message.answer(
         "Выбери, что ты хочешь искать:",
         reply_markup=ReplyKeyboardMarkup(
@@ -147,9 +162,7 @@ async def handle_message(message: types.Message):
         await message.answer("Сначала выбери тип поиска: видео или музыку.", reply_markup=get_start_keyboard())
         return
 
-    # Добавляем запрос в историю
     update_search_history(chat_id, query)
-
     results = await (search_video(query) if search_type[chat_id] == "video" else search_music(query))
 
     if not results:
@@ -217,7 +230,6 @@ async def handle_new_search(callback: types.CallbackQuery):
 async def handle_stop_search(callback: types.CallbackQuery):
     chat_id = callback.message.chat.id
 
-    # Очищаем данные пользователя
     if chat_id in search_results:
         del search_results[chat_id]
     if chat_id in current_index:
