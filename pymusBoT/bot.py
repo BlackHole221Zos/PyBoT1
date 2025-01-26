@@ -25,15 +25,17 @@ def save_user_query(chat_id: int, query: str):
     if chat_id not in user_data:
         user_data[chat_id] = {"history": [], "results": [], "index": 0, "type": None}
     user_data[chat_id]["history"].append(query)
+    # Ограничиваем историю последними 10 запросами
+    if len(user_data[chat_id]["history"]) > 10:
+        user_data[chat_id]["history"] = user_data[chat_id]["history"][-10:]
 
 # Клавиатуры
 def create_main_menu():
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="▶️ Начать")],
-            [KeyboardButton(text="🎥 Искать видео на Rutube")],
-            [KeyboardButton(text="🎵 Искать музыку на Bandcamp")],
-            [KeyboardButton(text="📜 История запросов")],
+            [KeyboardButton(text="🎥 Видео на Rutube"), KeyboardButton(text="🎵 Музыка на Bandcamp")],
+            [KeyboardButton(text="📜 История"), KeyboardButton(text="❌ Очистить историю")],
             [KeyboardButton(text="🏠 Главное меню")]
         ],
         resize_keyboard=True
@@ -90,8 +92,7 @@ async def start_bot(message: types.Message):
 async def start_search(message: types.Message):
     await message.answer("Выбери, что ты хочешь искать:", reply_markup=ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="🎥 Искать видео на Rutube")],
-            [KeyboardButton(text="🎵 Искать музыку на Bandcamp")]
+            [KeyboardButton(text="🎥 Видео на Rutube"), KeyboardButton(text="🎵 Музыка на Bandcamp")]
         ],
         resize_keyboard=True
     ))
@@ -102,12 +103,12 @@ async def return_to_menu(message: types.Message):
     await message.answer("Вы вернулись в главное меню.", reply_markup=create_main_menu())
 
 # Обработчик выбора типа поиска
-@dp.message(lambda message: message.text in ["🎥 Искать видео на Rutube", "🎵 Искать музыку на Bandcamp"])
+@dp.message(lambda message: message.text in ["🎥 Видео на Rutube", "🎵 Музыка на Bandcamp"])
 async def choose_search_type(message: types.Message):
     chat_id = message.chat.id
     if chat_id not in user_data:
         user_data[chat_id] = {"history": [], "results": [], "index": 0, "type": None}
-    user_data[chat_id]["type"] = "video" if message.text == "🎥 Искать видео на Rutube" else "music"
+    user_data[chat_id]["type"] = "video" if message.text == "🎥 Видео на Rutube" else "music"
     await message.answer(f"Отлично! Теперь я буду искать {'видео на Rutube' if user_data[chat_id]['type'] == 'video' else 'музыку на Bandcamp'}. Введи запрос:", reply_markup=create_main_menu())
 
 # Обработчик текстовых сообщений
@@ -116,12 +117,20 @@ async def process_query(message: types.Message):
     chat_id = message.chat.id
     query = message.text.strip()
 
-    if query == "📜 История запросов":
+    if query == "📜 История":
         if chat_id in user_data and user_data[chat_id]["history"]:
             history = "\n".join(f"{i}. {item}" for i, item in enumerate(user_data[chat_id]["history"], 1))
             await message.answer(f"История запросов:\n{history}")
         else:
             await message.answer("История запросов пуста.")
+        return
+
+    if query == "❌ Очистить историю":  # Обработчик для очистки истории
+        if chat_id in user_data:
+            user_data[chat_id]["history"] = []
+            await message.answer("История запросов очищена.", reply_markup=create_main_menu())
+        else:
+            await message.answer("История запросов уже пуста.", reply_markup=create_main_menu())
         return
 
     if query == "🏠 Главное меню":
