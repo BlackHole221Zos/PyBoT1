@@ -12,8 +12,8 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 # Конфигурация
-BOT_TOKEN = '7680940661:AAHVMKA6wfF9TN2XIPoMV8bJO-34euXJ1os'  # Замените на реальный токен!
-ADMIN_IDS = [991357162]  # Замените на ваш ID
+BOT_TOKEN = 'ВАШ_ТОКЕН'  # Замените на реальный токен!
+ADMIN_IDS = []  # Замените на ваш ID
 
 # Инициализация бота и диспетчера
 bot = Bot(token=BOT_TOKEN)
