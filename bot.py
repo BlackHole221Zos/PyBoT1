@@ -11,35 +11,25 @@ import asyncio
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-# Токен бота
-BOT_TOKEN = 'ВАШ_ТОКЕН_БОТА'
+# Конфигурация
+BOT_TOKEN = '7680940661:AAHVMKA6wfF9TN2XIPoMV8bJO-34euXJ1os'  # Замените на реальный токен!
+ADMIN_IDS = [991357162]  # Замените на ваш ID
 
 # Инициализация бота и диспетчера
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
-# Словарь для хранения данных пользователей
+# Глобальные переменные
 user_data = {}
+broadcast_mode = False
 
-# Функция для сохранения запросов пользователя
-def save_user_query(chat_id: int, query: str):
-    if chat_id not in user_data:
-        user_data[chat_id] = {"history": [], "results": [], "index": 0, "type": None}
-    user_data[chat_id]["history"].append(query)
-    # Ограничиваем историю последними 10 запросами
-    if len(user_data[chat_id]["history"]) > 10:
-        user_data[chat_id]["history"] = user_data[chat_id]["history"][-10:]
-
-# Создание клавиатуры для старта (только кнопка "Начать")
+# КЛАВИАТУРЫ 
 def create_start_keyboard():
     return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="▶️ Начать")]
-        ],
+        keyboard=[[KeyboardButton(text="▶️ Начать")]],
         resize_keyboard=True
     )
 
-# Создание основной клавиатуры
 def create_main_menu():
     return ReplyKeyboardMarkup(
         keyboard=[
@@ -50,16 +40,12 @@ def create_main_menu():
         resize_keyboard=True
     )
 
-# Создание клавиатуры только с кнопкой "Главное меню"
 def create_menu_only_keyboard():
     return ReplyKeyboardMarkup(
-        keyboard=[
-            [KeyboardButton(text="🏠 Главное меню")]
-        ],
+        keyboard=[[KeyboardButton(text="🏠 Главное меню")]],
         resize_keyboard=True
     )
 
-# Создание клавиатуры для поиска
 def create_search_buttons():
     return InlineKeyboardMarkup(
         inline_keyboard=[
@@ -71,11 +57,20 @@ def create_search_buttons():
         ]
     )
 
-# Поиск видео на Rutube
+def create_admin_keyboard():
+    return ReplyKeyboardMarkup(
+        keyboard=[
+            [KeyboardButton(text="📊 Статистика"), KeyboardButton(text="📢 Рассылка")],
+            [KeyboardButton(text="🔙 Назад")]
+        ],
+        resize_keyboard=True
+    )
+
+# ПОИСК
 async def find_videos(query: str):
     url = f"https://rutube.ru/api/search/video/?query={query}"
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
-
+    
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers) as response:
             if response.status == 200:
@@ -84,11 +79,10 @@ async def find_videos(query: str):
             logger.error(f"Ошибка запроса: {response.status}")
     return []
 
-# Поиск музыки на Bandcamp
 async def find_music(query: str):
     url = f"https://bandcamp.com/search?q={query}"
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
-
+    
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers) as response:
             if response.status == 200:
@@ -97,146 +91,131 @@ async def find_music(query: str):
             logger.error(f"Ошибка запроса: {response.status}")
     return []
 
-# Обработчик команды /start
+#ОБРАБОТЧИКИ 
 @dp.message(Command("start"))
 async def start_bot(message: types.Message):
     name = message.from_user.first_name
-    username = message.from_user.username
-    greeting = f"Привет, {name}!" + (f" (@{username})" if username else "")
-    await message.answer(greeting)
-    await message.answer("Я бот для поиска видео и музыки. Нажми «▶️ Начать», чтобы выбрать тип поиска.)", reply_markup=create_start_keyboard())
+    await message.answer(f"Привет, {name}!\nЯ бот для поиска видео и музыки. Нажми «▶️ Начать»", reply_markup=create_start_keyboard())
 
-# Обработчик кнопки "Начать"
+@dp.message(Command("admin"))
+async def admin_panel(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
+        await message.answer("❌ Доступ запрещен")
+        return
+    await message.answer("⚙️ Админ-панель:", reply_markup=create_admin_keyboard())
+
 @dp.message(lambda message: message.text == "▶️ Начать")
 async def start_search(message: types.Message):
-    await message.answer("Выбери, что ты хочешь искать:", reply_markup=create_main_menu())
+    await message.answer("Выбери тип поиска:", reply_markup=create_main_menu())
 
-# Обработчик кнопки "Главное меню"
 @dp.message(lambda message: message.text == "🏠 Главное меню")
 async def return_to_menu(message: types.Message):
-    await message.answer("Вы вернулись в главное меню.", reply_markup=create_main_menu())
+    await message.answer("Главное меню:", reply_markup=create_main_menu())
 
-
-
-# Обработчик выбора типа поиска
 @dp.message(lambda message: message.text in ["🎥 Видео на Rutube", "🎵 Музыка на Bandcamp"])
 async def choose_search_type(message: types.Message):
     chat_id = message.chat.id
-    if chat_id not in user_data:
-        user_data[chat_id] = {"history": [], "results": [], "index": 0, "type": None}
+    user_data[chat_id] = {"history": [], "results": [], "index": 0, "type": None}
     user_data[chat_id]["type"] = "video" if message.text == "🎥 Видео на Rutube" else "music"
-    await message.answer(
-        f"Отлично! Теперь я буду искать {'видео на Rutube' if user_data[chat_id]['type'] == 'video' else 'музыку на Bandcamp'}. Введи запрос:",
-        reply_markup=create_menu_only_keyboard()  # Только кнопка "Главное меню"
-    )
+    await message.answer(f"Ищем {'видео' if user_data[chat_id]['type'] == 'video' else 'музыку'}. Введите запрос:", reply_markup=create_menu_only_keyboard())
 
-# Обработчик текстовых сообщений
+@dp.message(lambda message: message.text == "📊 Статистика")
+async def show_stats(message: types.Message):
+    if message.from_user.id not in ADMIN_IDS:
+        await message.answer("❌ Доступ запрещен")
+        return
+    await message.answer(f"👥 Пользователей: {len(user_data)}")
+
+@dp.message(lambda message: message.text == "📢 Рассылка")
+async def start_broadcast(message: types.Message):
+    global broadcast_mode
+    if message.from_user.id not in ADMIN_IDS:
+        await message.answer("❌ Доступ запрещен")
+        return
+    broadcast_mode = True
+    await message.answer("Введите сообщение для рассылки:")
+
+@dp.message(lambda message: message.text == "🔙 Назад")
+async def admin_back(message: types.Message):
+    await message.answer("Главное меню:", reply_markup=create_main_menu())
+
 @dp.message()
 async def process_query(message: types.Message):
+    global broadcast_mode
     chat_id = message.chat.id
-    query = message.text.strip()
+    text = message.text.strip()
 
-    if query == "📜 История":
-        if chat_id in user_data and user_data[chat_id]["history"]:
-            history = "\n".join(f"{i}. {item}" for i, item in enumerate(user_data[chat_id]["history"], 1))
-            await message.answer(f"История запросов:\n{history}")
+    # Режим рассылки
+    if broadcast_mode and message.from_user.id in ADMIN_IDS:
+        broadcast_mode = False
+        success = 0
+        for user_id in user_data:
+            try:
+                await bot.send_message(user_id, text)
+                success += 1
+            except:
+                pass
+        await message.answer(f"✅ Рассылка отправлена {success} пользователям")
+        return
+
+    # Основная логика
+    if text == "📜 История":
+        history = "\n".join(user_data.get(chat_id, {}).get("history", []))
+        await message.answer(f"📖 История:\n{history or 'Пусто'}")
+    
+    elif text == "❌ Очистить историю":
+        user_data[chat_id] = {"history": [], "results": [], "index": 0, "type": None}
+        await message.answer("🗑 История очищена")
+    
+    elif chat_id in user_data and user_data[chat_id].get("type"):
+        # Поиск контента
+        user_data[chat_id]["history"].append(text)
+        results = await (find_videos(text) if user_data[chat_id]["type"] == "video" else find_music(text))
+        
+        if results:
+            user_data[chat_id]["results"] = results
+            user_data[chat_id]["index"] = 0
+            await show_result(chat_id, message)
         else:
-            await message.answer("История запросов пуста.")
-        return
-
-    if query == "❌ Очистить историю":
-        if chat_id in user_data:
-            user_data[chat_id]["history"] = []
-            await message.answer("История запросов очищена.", reply_markup=create_main_menu())
-        else:
-            await message.answer("История запросов уже пуста.", reply_markup=create_main_menu())
-        return
-
-    if query == "🏠 Главное меню":
-        await return_to_menu(message)
-        return
-
-    if chat_id not in user_data or not user_data[chat_id]["type"]:
-        await message.answer("Сначала выбери тип поиска.", reply_markup=create_main_menu())
-        return
-
-    save_user_query(chat_id, query)
-    if user_data[chat_id]["type"] == "video":
-        results = await find_videos(query)
+            await message.answer("😞 Ничего не найдено")
+    
     else:
-        results = await find_music(query)
+        await message.answer("⚠️ Сначала выберите тип поиска")
 
-    if not results:
-        await message.answer("Ничего не найдено. Попробуй другой запрос.", reply_markup=create_main_menu())
-        return
-
-    user_data[chat_id]["results"] = results
-    user_data[chat_id]["index"] = 0
-    await show_result(chat_id, message)
-
-# Отправка результата пользователю
+#ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ 
 async def show_result(chat_id: int, message: types.Message = None):
-    if chat_id not in user_data or not user_data[chat_id]["results"]:
-        return
-
     result = user_data[chat_id]["results"][user_data[chat_id]["index"]]
-    text = f"🎵 Найдено: <b>{result[0]}</b>\n🔗 Ссылка: {result[1]}"
+    text = f"🔍 Результат:\n<b>{result[0]}</b>\n🌐 Ссылка: {result[1]}"
+    await (message.answer if message else bot.send_message)(chat_id, text, parse_mode=ParseMode.HTML, reply_markup=create_search_buttons())
 
-    if message:
-        await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=create_search_buttons())
-    else:
-        await bot.send_message(chat_id, text, parse_mode=ParseMode.HTML, reply_markup=create_search_buttons())
-
-
-
-# Обработчик кнопки "Искать ещё"
-@dp.callback_query(lambda callback: callback.data == "more")
-async def next_result(callback: types.CallbackQuery):
+@dp.callback_query(lambda c: c.data in ["more", "new", "stop"])
+async def handle_callbacks(callback: types.CallbackQuery):
     chat_id = callback.message.chat.id
+    data = callback.data
+    
+    if data == "more":
+        user_data[chat_id]["index"] += 1
+        if user_data[chat_id]["index"] >= len(user_data[chat_id]["results"]):
+            await callback.answer("❌ Больше результатов нет")
+            return
+        await show_result(chat_id)
+    
+    elif data == "new":
+        await callback.message.answer("Введите новый запрос:")
+    
+    elif data == "stop":
+        user_data[chat_id] = {"history": [], "results": [], "index": 0, "type": None}
+        await callback.message.answer("Поиск остановлен", reply_markup=create_main_menu())
+    
+    await callback.answer()
 
-    if chat_id not in user_data or not user_data[chat_id]["results"]:
-        await callback.answer("Результаты устарели. Начни новый поиск.")
-        return
-
-    user_data[chat_id]["index"] += 1
-    if user_data[chat_id]["index"] >= len(user_data[chat_id]["results"]):
-        await callback.answer("Больше результатов нет.")
-        return
-
-    await callback.answer("Загружаю следующий результат...")
-    await show_result(chat_id)
-
-# Обработчик кнопки "Новый поиск"
-@dp.callback_query(lambda callback: callback.data == "new")
-async def new_search(callback: types.CallbackQuery):
-    chat_id = callback.message.chat.id
-    user_data[chat_id]["results"] = []
-    user_data[chat_id]["index"] = 0
-    await callback.answer("Начни новый поиск.")
-    await callback.message.answer("Введи новый запрос:", reply_markup=create_main_menu())
-
-
-
-# Обработчик кнопки "Закончить"
-@dp.callback_query(lambda callback: callback.data == "stop")
-async def stop_search(callback: types.CallbackQuery):
-    chat_id = callback.message.chat.id
-    user_data[chat_id]["results"] = []
-    user_data[chat_id]["index"] = 0
-    await callback.answer("Поиск завершён.")
-    await callback.message.answer("Поиск остановлен. Выбери что - то: ", reply_markup=create_main_menu())
-
-
-
-
-
-# Запуск бота
+#ЗАПУСК
 async def run_bot():
     try:
         logger.info("Бот запущен!")
         await dp.start_polling(bot)
     except Exception as e:
-        logger.error(f"Ошибка: {e}")
+        logger.error(f"ОШИБКА: {e}")
 
 if __name__ == '__main__':
     asyncio.run(run_bot())
