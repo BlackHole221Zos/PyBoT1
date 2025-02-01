@@ -14,8 +14,10 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(level
 logger = logging.getLogger(__name__)
 
 BOT_TOKEN = 'ВАШ_ТОКЕН_БОТА'
+
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
+
 user_data = {}
 
 def save_user_query(chat_id: int, query: str):
@@ -89,6 +91,7 @@ def create_search_buttons():
 async def find_videos(query: str):
     url = f"https://rutube.ru/api/search/video/?query={query}"
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
+
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers) as response:
             if response.status == 200:
@@ -101,6 +104,7 @@ async def find_videos(query: str):
 async def find_music(query: str):
     url = f"https://bandcamp.com/search?q={query}"
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
+
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers) as response:
             if response.status == 200:
@@ -134,18 +138,7 @@ async def help_command(message: types.Message):
 
 @dp.message(lambda message: message.text == "ℹ️ Помощь")
 async def help_button(message: types.Message):
-    help_text = (
-        "📚 Доступные команды:\n\n"
-        "▶️ Начать - начать работу с ботом\n"
-        "🎥 Видео на Rutube - поиск видео\n"
-        "🎵 Музыка на Bandcamp - поиск музыки\n"
-        "⭐ Избранное - ваши сохранённые результаты\n"
-        "⚙️ Настройки - настройки платформ\n"
-        "📜 История - история поисковых запросов\n"
-        "❌ Очистить историю - удалить историю запросов\n"
-        "ℹ️ Помощь - это сообщение"
-    )
-    await message.answer(help_text, reply_markup=create_main_menu())
+    await help_command(message)
 
 @dp.message(lambda message: message.text == "⚙️ Настройки")
 async def settings_menu(message: types.Message):
@@ -168,10 +161,12 @@ async def show_favorites(message: types.Message):
     if not user_data.get(chat_id, {}).get("favorites"):
         await message.answer("В избранном пока ничего нет.")
         return
+    
     builder = InlineKeyboardBuilder()
     for idx, item in enumerate(user_data[chat_id]["favorites"], 1):
         builder.add(InlineKeyboardButton(text=f"⭐ {idx}", callback_data=f"fav_{idx}"))
     builder.adjust(2)
+    
     await message.answer("Ваше избранное:", reply_markup=builder.as_markup())
 
 @dp.callback_query(lambda c: c.data.startswith("fav_"))
@@ -190,7 +185,7 @@ async def add_to_favorites(callback: types.CallbackQuery):
 @dp.callback_query(lambda c: c.data == "random")
 async def random_result(callback: types.CallbackQuery):
     chat_id = callback.message.chat.id
-    user_data[chat_id]["index"] = random.randint(0, len(user_data[chat_id]["results"]) - 1)
+    user_data[chat_id]["index"] = random.randint(0, len(user_data[chat_id]["results"])-1)
     await show_result(chat_id)
     await callback.answer()
 
@@ -258,20 +253,26 @@ async def clear_history(message: types.Message):
 async def process_query(message: types.Message):
     chat_id = message.chat.id
     query = message.text.strip()
+
     if query == "🏠 Главное меню":
         await return_to_menu(message)
         return
+
     if chat_id not in user_data or not user_data[chat_id]["type"]:
         await message.answer("Сначала выбери тип поиска.", reply_markup=create_main_menu())
         return
+
     save_user_query(chat_id, query)
+    
     if user_data[chat_id]["type"] == "video":
         results = await find_videos(query)
     else:
         results = await find_music(query)
+
     if not results:
         await message.answer("Ничего не найдено. Попробуй другой запрос.", reply_markup=create_main_menu())
         return
+
     user_data[chat_id]["results"] = results
     user_data[chat_id]["index"] = 0
     await show_result(chat_id, message)
@@ -279,7 +280,8 @@ async def process_query(message: types.Message):
 async def show_result(chat_id: int, message: types.Message = None):
     result = user_data[chat_id]["results"][user_data[chat_id]["index"]]
     text = f"🔍 Результат {user_data[chat_id]['index']+1}/{len(user_data[chat_id]['results'])}\n"
-    text += f"📌 Название: {result[0]}\n🔗 Ссылка: {result[1]}"
+    text += f"📌 Название: <b>{result[0]}</b>\n🔗 Ссылка: {result[1]}"
+    
     if message:
         await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=create_search_buttons())
     else:
