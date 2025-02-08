@@ -1,7 +1,7 @@
 from aiogram import Bot, Dispatcher, types
 from aiogram.enums import ParseMode
 from aiogram.filters import Command
-from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import FSInputFile, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup, KeyboardButton
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 import aiohttp
 from bs4 import BeautifulSoup
@@ -10,6 +10,7 @@ import asyncio
 import random
 import os
 from yt_dlp import YoutubeDL
+import subprocess
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -18,7 +19,6 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = 'ваш_токен'
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
-
 user_data = {}
 
 def save_user_query(chat_id: int, query: str):
@@ -30,7 +30,7 @@ def save_user_query(chat_id: int, query: str):
             "type": None,
             "favorites": [],
             "settings": {"default_platform": None},
-            "is_searching": False  # Флаг для отслеживания состояния поиска
+            "is_searching": False
         }
     if user_data[chat_id]["is_searching"]:
         user_data[chat_id]["history"].append(query)
@@ -94,7 +94,7 @@ def create_search_buttons():
 # Поиск видео на Rutube
 async def find_videos(query: str):
     url = f"https://rutube.ru/api/search/video/?query={query}"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
+    headers = {"User-Agent": "Mozilla/5.0"}
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers) as response:
             if response.status == 200:
@@ -106,7 +106,7 @@ async def find_videos(query: str):
 # Поиск музыки на Bandcamp
 async def find_music(query: str):
     url = f"https://bandcamp.com/search?q={query}"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
+    headers = {"User-Agent": "Mozilla/5.0"}
     async with aiohttp.ClientSession() as session:
         async with session.get(url, headers=headers) as response:
             if response.status == 200:
@@ -117,18 +117,55 @@ async def find_music(query: str):
 
 # Скачивание медиафайла
 ydl_opts = {
-    'format': 'bestvideo+bestaudio/best',  # Скачиваем видео с аудио
-    'outtmpl': '%(title)s.%(ext)s',       # Шаблон имени файла
+    'format': 'bestvideo+bestaudio/best',
+    'outtmpl': '%(title)s.%(ext)s',
 }
 
 async def download_media(url: str, chat_id: int):
     try:
+        # Проверяем размер файла перед скачиванием
+        async with aiohttp.ClientSession() as session:
+            async with session.head(url, allow_redirects=True) as response:
+                if response.status != 200:
+                    logger.error(f"Не удалось получить информацию о файле: {response.status}")
+                    return None
+                content_length = response.headers.get('Content-Length')
+                if content_length and int(content_length) > 2 * 1024 * 1024 * 1024:  # Проверка на 2 ГБ
+                    logger.warning("Файл слишком большой для отправки.")
+                    return "too_large"
+
+        # Скачиваем файл, если он подходит по размеру
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             file_path = ydl.prepare_filename(info)
-        return file_path
+            return file_path
+
     except Exception as e:
         logger.error(f"Ошибка при скачивании: {e}")
+        return None
+
+# Функция для перекодирования видео через FFMPEG
+async def convert_video(input_file: str, output_file: str):
+    try:
+        command = [
+            "ffmpeg",
+            "-i", input_file,
+            "-c:v", "libx264",
+            "-crf", "23",  # Качество видео (меньше число — лучше качество)
+            "-preset", "fast",
+            "-c:a", "aac",
+            "-b:a", "128k",  # Битрейт аудио
+            "-movflags", "+faststart",
+            output_file
+        ]
+        process = await asyncio.create_subprocess_exec(*command, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        stdout, stderr = await process.communicate()
+        if process.returncode != 0:
+            logger.error(f"Ошибка при конвертации видео: {stderr.decode()}")
+            return None
+        return output_file
+    except Exception as e:
+        logger.error(f"Ошибка при конвертации видео: {e}")
         return None
 
 @dp.message(Command("start"))
@@ -322,56 +359,52 @@ async def stop_search(callback: types.CallbackQuery):
 @dp.callback_query(lambda c: c.data == "download")
 async def download_file(callback: types.CallbackQuery):
     chat_id = callback.message.chat.id
-
-    # Проверяем наличие данных
     if chat_id not in user_data or "results" not in user_data[chat_id] or "index" not in user_data[chat_id]:
         await callback.answer("Нет доступных результатов для скачивания.")
         return
-
     try:
         url = user_data[chat_id]["results"][user_data[chat_id]["index"]][1]
     except IndexError:
         await callback.answer("Выбранный результат недоступен для скачивания.")
         return
 
-    # Отправляем сообщение о начале загрузки
     loading_message = await callback.message.answer("⏳ Загрузка файла...")
+    file_result = await download_media(url, chat_id)
 
-    # Скачиваем файл
-    file_path = await download_media(url, chat_id)
-
-    if file_path:
+    if file_result == "too_large":
+        await loading_message.edit_text("❌ Файл слишком большой для отправки (максимум 2 ГБ).")
+    elif file_result:
         try:
-            # Проверяем размер файла
-            if os.path.getsize(file_path) > 50 * 1024 * 1024:
-                await callback.message.answer("Файл слишком большой для отправки (максимум 50 МБ).")
+            file_size = os.path.getsize(file_result)
+            if file_size > 2 * 1024 * 1024 * 1024:  # Проверка на 2 ГБ
+                await loading_message.edit_text("❌ Файл слишком большой для отправки (максимум 2 ГБ).")
                 return
 
-            # Определяем тип файла
-            if file_path.endswith('.mp4'):  # Если это видео
-                with open(file_path, 'rb') as video:
-                    await bot.send_video(chat_id, video)
-            elif file_path.endswith('.mp3'):  # Если это аудио
-                with open(file_path, 'rb') as audio:
-                    await bot.send_audio(chat_id, audio)
+            # Если это видео, попробуем его перекодировать через FFMPEG
+            if file_result.endswith('.mp4'):
+                converted_file = await convert_video(file_result, f"{file_result}.converted.mp4")
+                if converted_file:
+                    file_result = converted_file
+
+            if file_result.endswith('.mp4'):  # Если это видео
+                video = FSInputFile(file_result)
+                await bot.send_video(chat_id, video=video, caption="Загруженное видео")
+            elif file_result.endswith('.mp3'):  # Если это аудио
+                audio = FSInputFile(file_result)
+                await bot.send_audio(chat_id, audio=audio, caption="Загруженный аудиофайл")
             else:
-                await callback.message.answer("Формат файла не поддерживается.")
-                return
-
-            # Обновляем сообщение о загрузке
-            await loading_message.edit_text("✅ Файл успешно загружен!")
+                document = FSInputFile(file_result)
+                await bot.send_document(chat_id, document=document, caption="Загруженный файл")
         except Exception as e:
             logger.error(f"Ошибка при отправке файла: {e}")
             await callback.message.answer(f"Произошла ошибка: {str(e)}")
         finally:
-            # Удаляем временный файл только после отправки
-            if os.path.exists(file_path):
-                os.remove(file_path)
+            if os.path.exists(file_result):
+                os.remove(file_result)  # Удаляем исходный файл
+            if os.path.exists(f"{file_result}.converted.mp4"):
+                os.remove(f"{file_result}.converted.mp4")  # Удаляем преобразованный файл
     else:
-        # Если скачивание не удалось
         await loading_message.edit_text("❌ Не удалось скачать файл.")
-
-    # Удаляем кнопки из оригинального сообщения
     await callback.message.edit_reply_markup(reply_markup=None)
 
 async def run_bot():
