@@ -8,13 +8,17 @@ from bs4 import BeautifulSoup
 import logging
 import asyncio
 import random
+import os
+from yt_dlp import YoutubeDL
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
-BOT_TOKEN = 'ВАШ_ТОКЕН'
+
+BOT_TOKEN = '8077942042:AAFORY5NfxeGicOIvOJjNOBMtf4Aya20ymA'
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
+
 user_data = {}
 
 def save_user_query(chat_id: int, query: str):
@@ -26,7 +30,7 @@ def save_user_query(chat_id: int, query: str):
             "type": None,
             "favorites": [],
             "settings": {"default_platform": None},
-            "is_searching": False  # New flag to track search context
+            "is_searching": False  # Флаг для отслеживания состояния поиска
         }
     if user_data[chat_id]["is_searching"]:
         user_data[chat_id]["history"].append(query)
@@ -80,6 +84,7 @@ def create_search_buttons():
                 InlineKeyboardButton(text="🎲 Случайный", callback_data="random")
             ],
             [
+                InlineKeyboardButton(text="⬇️ Скачать", callback_data="download"),
                 InlineKeyboardButton(text="🔄 Новый поиск", callback_data="new"),
                 InlineKeyboardButton(text="❌ Закончить", callback_data="stop")
             ]
@@ -109,6 +114,22 @@ async def find_music(query: str):
                 return [(item.find('div', {'class': 'heading'}).text.strip(), item.find('a')['href']) for item in soup.find_all('li', {'class': 'searchresult'})]
             logger.error(f"Ошибка запроса: {response.status}")
     return []
+
+# Скачивание медиафайла
+ydl_opts = {
+    'format': 'bestvideo+bestaudio/best',  # Скачиваем видео с аудио
+    'outtmpl': '%(title)s.%(ext)s',       # Шаблон имени файла
+}
+
+async def download_media(url: str, chat_id: int):
+    try:
+        with YoutubeDL(ydl_opts) as ydl:
+            info = ydl.extract_info(url, download=True)
+            file_path = ydl.prepare_filename(info)
+        return file_path
+    except Exception as e:
+        logger.error(f"Ошибка при скачивании: {e}")
+        return None
 
 @dp.message(Command("start"))
 async def start_bot(message: types.Message):
@@ -180,7 +201,7 @@ async def add_to_favorites(callback: types.CallbackQuery):
 @dp.callback_query(lambda c: c.data == "random")
 async def random_result(callback: types.CallbackQuery):
     chat_id = callback.message.chat.id
-    user_data[chat_id]["index"] = random.randint(0, len(user_data[chat_id]["results"])-1)
+    user_data[chat_id]["index"] = random.randint(0, len(user_data[chat_id]["results"]) - 1)
     await show_result(chat_id)
     await callback.answer()
 
@@ -215,11 +236,10 @@ async def choose_search_type(message: types.Message):
             "type": None,
             "favorites": [],
             "settings": {"default_platform": None},
-            "is_searching": True  # Start searching
+            "is_searching": True
         }
     else:
         user_data[chat_id]["is_searching"] = True
-    
     user_data[chat_id]["type"] = "video" if message.text == "🎥 Видео на Rutube" else "music"
     await message.answer(
         f"Отлично! Теперь я буду искать {'видео на Rutube' if user_data[chat_id]['type'] == 'video' else 'музыку на Bandcamp'}. Введи запрос:",
@@ -230,7 +250,7 @@ async def choose_search_type(message: types.Message):
 async def return_to_menu(message: types.Message):
     chat_id = message.chat.id
     if chat_id in user_data:
-        user_data[chat_id]["is_searching"] = False  # Stop searching
+        user_data[chat_id]["is_searching"] = False
     await message.answer("Вы вернулись в главное меню.", reply_markup=create_main_menu())
 
 @dp.message(lambda message: message.text == "📜 История")
@@ -255,27 +275,21 @@ async def clear_history(message: types.Message):
 async def process_query(message: types.Message):
     chat_id = message.chat.id
     query = message.text.strip()
-    
     if query == "🏠 Главное меню":
         await return_to_menu(message)
         return
-    
     if chat_id not in user_data or not user_data[chat_id]["type"]:
         await message.answer("Сначала выбери тип поиска.", reply_markup=create_main_menu())
         return
-    
     if user_data[chat_id]["is_searching"]:
         save_user_query(chat_id, query)
-    
     if user_data[chat_id]["type"] == "video":
         results = await find_videos(query)
     else:
         results = await find_music(query)
-    
     if not results:
         await message.answer("Ничего не найдено. Попробуй другой запрос.", reply_markup=create_main_menu())
         return
-    
     user_data[chat_id]["results"] = results
     user_data[chat_id]["index"] = 0
     await show_result(chat_id, message)
@@ -304,6 +318,61 @@ async def stop_search(callback: types.CallbackQuery):
     user_data[chat_id]["index"] = 0
     await callback.answer("Поиск завершён.")
     await callback.message.answer("Поиск остановлен. Выберите действие:", reply_markup=create_main_menu())
+
+@dp.callback_query(lambda c: c.data == "download")
+async def download_file(callback: types.CallbackQuery):
+    chat_id = callback.message.chat.id
+
+    # Проверяем наличие данных
+    if chat_id not in user_data or "results" not in user_data[chat_id] or "index" not in user_data[chat_id]:
+        await callback.answer("Нет доступных результатов для скачивания.")
+        return
+
+    try:
+        url = user_data[chat_id]["results"][user_data[chat_id]["index"]][1]
+    except IndexError:
+        await callback.answer("Выбранный результат недоступен для скачивания.")
+        return
+
+    # Отправляем сообщение о начале загрузки
+    loading_message = await callback.message.answer("⏳ Загрузка файла...")
+
+    # Скачиваем файл
+    file_path = await download_media(url, chat_id)
+
+    if file_path:
+        try:
+            # Проверяем размер файла
+            if os.path.getsize(file_path) > 50 * 1024 * 1024:
+                await callback.message.answer("Файл слишком большой для отправки (максимум 50 МБ).")
+                return
+
+            # Определяем тип файла
+            if file_path.endswith('.mp4'):  # Если это видео
+                with open(file_path, 'rb') as video:
+                    await bot.send_video(chat_id, video)
+            elif file_path.endswith('.mp3'):  # Если это аудио
+                with open(file_path, 'rb') as audio:
+                    await bot.send_audio(chat_id, audio)
+            else:
+                await callback.message.answer("Формат файла не поддерживается.")
+                return
+
+            # Обновляем сообщение о загрузке
+            await loading_message.edit_text("✅ Файл успешно загружен!")
+        except Exception as e:
+            logger.error(f"Ошибка при отправке файла: {e}")
+            await callback.message.answer(f"Произошла ошибка: {str(e)}")
+        finally:
+            # Удаляем временный файл только после отправки
+            if os.path.exists(file_path):
+                os.remove(file_path)
+    else:
+        # Если скачивание не удалось
+        await loading_message.edit_text("❌ Не удалось скачать файл.")
+
+    # Удаляем кнопки из оригинального сообщения
+    await callback.message.edit_reply_markup(reply_markup=None)
 
 async def run_bot():
     try:
