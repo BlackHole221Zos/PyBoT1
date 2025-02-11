@@ -16,10 +16,12 @@ from pathlib import Path
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = 'ВАШ_ТОКЕН'
+BOT_TOKEN = 'Ваш_токен'
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 user_data = {}
+
+DONATE_URL = "https://www.donationalerts.com/r/black_h0le_d"  # Ссылка на донат
 
 def save_user_query(chat_id: int, query: str):
     if chat_id not in user_data:
@@ -49,7 +51,7 @@ def create_main_menu():
             [KeyboardButton(text="🎥 Видео на Rutube"), KeyboardButton(text="🎵 Музыка на Bandcamp")],
             [KeyboardButton(text="⭐ Избранное"), KeyboardButton(text="⚙️ Настройки")],
             [KeyboardButton(text="📜 История"), KeyboardButton(text="❌ Очистить историю")],
-            [KeyboardButton(text="ℹ️ Помощь")]
+            [KeyboardButton(text="ℹ️ Помощь"), KeyboardButton(text="💰 Донат")]  # Добавлена кнопка доната
         ],
         resize_keyboard=True
     )
@@ -91,48 +93,6 @@ def create_search_buttons():
         ]
     )
 
-# Поиск видео на Rutube
-async def find_videos(query: str):
-    url = f"https://rutube.ru/api/search/video/?query={query}"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers) as response:
-            if response.status == 200:
-                data = await response.json()
-                return [(item.get("title", "Без названия"), f"https://rutube.ru/video/{item.get('id')}/") for item in data.get("results", [])]
-            logger.error(f"Ошибка запроса: {response.status}")
-    return []
-
-# Поиск музыки на Bandcamp
-async def find_music(query: str):
-    url = f"https://bandcamp.com/search?q={query}"
-    headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"}
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers) as response:
-            if response.status == 200:
-                soup = BeautifulSoup(await response.text(), 'html.parser')
-                return [(item.find('div', {'class': 'heading'}).text.strip(), item.find('a')['href']) for item in soup.find_all('li', {'class': 'searchresult'})]
-            logger.error(f"Ошибка запроса: {response.status}")
-    return []
-
-# Скачивание медиафайла
-ydl_opts = {
-    'format': 'bestvideo+bestaudio/best',
-    'outtmpl': '%(title)s.%(ext)s',
-}
-
-async def download_media(url: str, chat_id: int):
-    try:
-        with YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            # Получаем список всех скаченных файлов
-            directory = Path.cwd()
-            downloaded_files = [str(file) for file in directory.iterdir() if file.is_file() and file.stat().st_ctime > os.path.getctime(__file__)]
-            return downloaded_files
-    except Exception as e:
-        logger.error(f"Ошибка при скачивании: {e}")
-        return []
-
 @dp.message(Command("start"))
 async def start_bot(message: types.Message):
     name = message.from_user.first_name
@@ -152,7 +112,8 @@ async def help_command(message: types.Message):
         "⚙️ Настройки - настройки платформ\n"
         "📜 История - история поисковых запросов\n"
         "❌ Очистить историю - удалить историю запросов\n"
-        "ℹ️ Помощь - это сообщение"
+        "ℹ️ Помощь - это сообщение\n"
+        "💰 Донат - поддержать проект"
     )
     await message.answer(help_text, reply_markup=create_main_menu())
 
@@ -273,43 +234,79 @@ async def clear_history(message: types.Message):
     else:
         await message.answer("История запросов уже пуста.", reply_markup=create_main_menu())
 
+@dp.message(lambda message: message.text == "💰 Донат")  # Обработчик кнопки доната
+async def donate(message: types.Message):
+    await message.answer(
+        "Спасибо за поддержку! Вы можете задонатить по ссылке ниже:",
+        reply_markup=InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="💰 Перейти к донату", url=DONATE_URL)]
+            ]
+        )
+    )
+
 @dp.message()
 async def process_query(message: types.Message):
     chat_id = message.chat.id
     query = message.text.strip()
-
     if query == "🏠 Главное меню":
         await return_to_menu(message)
         return
-
     if chat_id not in user_data or not user_data[chat_id]["type"]:
         await message.answer("Сначала выбери тип поиска.", reply_markup=create_main_menu())
         return
-
     if user_data[chat_id]["is_searching"]:
         save_user_query(chat_id, query)
-
-    # Поиск видео или музыки в зависимости от типа
     if user_data[chat_id]["type"] == "video":
         results = await find_videos(query)
     elif user_data[chat_id]["type"] == "music":
         results = await find_music(query)
-
     if not results:
         await message.answer("Ничего не найдено. Попробуй другой запрос.", reply_markup=create_main_menu())
         return
-
-    # Если это музыка и найдено несколько треков, отправляем их по одному
     if user_data[chat_id]["type"] == "music" and len(results) > 1:
         for idx, result in enumerate(results):
             user_data[chat_id]["index"] = idx
-            user_data[chat_id]["results"] = [result]  # Устанавливаем один результат для отправки
+            user_data[chat_id]["results"] = [result]
             await show_result(chat_id, message)
-            await asyncio.sleep(1)  # Задержка между отправками
+            await asyncio.sleep(1)
     else:
         user_data[chat_id]["results"] = results
         user_data[chat_id]["index"] = 0
         await show_result(chat_id, message)
+
+async def find_videos(query: str):
+    url = f"https://rutube.ru/api/search/video/?query={query}"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=headers) as response:
+            if response.status == 200:
+                data = await response.json()
+                return [(item.get("title", "Без названия"), f"https://rutube.ru/video/{item.get('id')}/") for item in data.get("results", [])]
+            logger.error(f"Ошибка запроса: {response.status}")
+    return []
+
+async def find_music(query: str):
+    url = f"https://bandcamp.com/search?q={query}"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=headers) as response:
+            if response.status == 200:
+                soup = BeautifulSoup(await response.text(), 'html.parser')
+                return [(item.find('div', {'class': 'heading'}).text.strip(), item.find('a')['href']) for item in soup.find_all('li', {'class': 'searchresult'})]
+            logger.error(f"Ошибка запроса: {response.status}")
+    return []
+
+async def download_media(url: str, chat_id: int):
+    try:
+        with YoutubeDL({'format': 'bestvideo+bestaudio/best', 'outtmpl': '%(title)s.%(ext)s'}) as ydl:
+            info = ydl.extract_info(url, download=True)
+        directory = Path.cwd()
+        downloaded_files = [str(file) for file in directory.iterdir() if file.is_file() and file.stat().st_ctime > os.path.getctime(__file__)]
+        return downloaded_files
+    except Exception as e:
+        logger.error(f"Ошибка при скачивании: {e}")
+        return []
 
 async def show_result(chat_id: int, message: types.Message = None):
     result = user_data[chat_id]["results"][user_data[chat_id]["index"]]
@@ -317,7 +314,6 @@ async def show_result(chat_id: int, message: types.Message = None):
     text += f"📌 Название: {result[0]}\n🔗 Ссылка: {result[1]}"
     if message:
         if user_data[chat_id]["type"] == "music" and len(user_data[chat_id]["results"]) > 1:
-            # Для множественных треков отправляем без кнопок
             await message.answer(text, parse_mode=ParseMode.HTML)
         else:
             await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=create_search_buttons())
@@ -343,64 +339,44 @@ async def stop_search(callback: types.CallbackQuery):
 @dp.callback_query(lambda c: c.data == "download")
 async def download_file(callback: types.CallbackQuery):
     chat_id = callback.message.chat.id
-
-    # Проверяем наличие данных
     if chat_id not in user_data or "results" not in user_data[chat_id] or "index" not in user_data[chat_id]:
         await callback.answer("Нет доступных результатов для скачивания.")
         return
-
     try:
         url = user_data[chat_id]["results"][user_data[chat_id]["index"]][1]
     except IndexError:
         await callback.answer("Выбранный результат недоступен для скачивания.")
         return
-
-    # Отправляем сообщение о начале загрузки
     loading_message = await callback.message.answer("⏳ Загрузка файла...")
-
-    # Скачиваем файл(ы)
     file_paths = await download_media(url, chat_id)
     if not file_paths:
         await loading_message.edit_text("❌ Не удалось скачать файл.")
         return
-
     try:
         for file_path in file_paths:
-            # Проверяем размер файла
             file_size = os.path.getsize(file_path)
-
-            # Если файл больше 50 МБ, отправляем как документ
-            if file_size > 50 * 1024 * 1024:  # 50 МБ
+            if file_size > 50 * 1024 * 1024:
                 document = FSInputFile(file_path)
                 await bot.send_document(chat_id, document=document, caption="Файл слишком большой для отправки как медиа, отправляю как документ.")
             else:
-                # Для видео (<50 МБ) используем sendVideo
                 if file_path.endswith('.mp4'):
                     video = FSInputFile(file_path)
                     await bot.send_video(chat_id, video=video, caption="Загруженное видео")
-                # Для аудио (<50 МБ) используем sendAudio
                 elif file_path.endswith('.mp3'):
                     audio = FSInputFile(file_path)
                     await bot.send_audio(chat_id, audio=audio, caption="Загруженный аудиофайл")
                 else:
                     document = FSInputFile(file_path)
                     await bot.send_document(chat_id, document=document, caption="Загруженный файл")
-
-            # Добавляем небольшую задержку между отправками
             await asyncio.sleep(1)
-
-        # Обновляем сообщение о загрузке
         await loading_message.edit_text("✅ Все файлы успешно загружены!")
     except Exception as e:
         logger.error(f"Ошибка при отправке файла: {e}")
         await callback.message.answer(f"Произошла ошибка: {str(e)}")
     finally:
-        # Удаляем временные файлы
         for file_path in file_paths:
             if os.path.exists(file_path):
                 os.remove(file_path)
-
-    # Удаляем кнопки из оригинального сообщения
     await callback.message.edit_reply_markup(reply_markup=None)
 
 async def run_bot():
