@@ -15,7 +15,7 @@ from pathlib import Path
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = 'YOUR_BOT_TOKEN'
+BOT_TOKEN = 'ваш_токен'
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 user_data = {}
