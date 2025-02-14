@@ -15,13 +15,12 @@ from pathlib import Path
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = 'YOUR_BOT_TOKEN'
+BOT_TOKEN = '8016665117:AAFRJENXHzEiZ05g58TY-7sGUz1Lka4Pvzg'
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 user_data = {}
 DONATE_URL = "https://www.donationalerts.com/r/black_h0le_d"
 RUTUBE_DOWNLOAD_SITE = "https://cobalt.tools/?url="
-
 
 def save_user_query(chat_id: int, query: str):
     if chat_id not in user_data:
@@ -30,15 +29,14 @@ def save_user_query(chat_id: int, query: str):
             "results": [],
             "index": 0,
             "type": None,
-            "favorites": [],
             "settings": {"default_platform": None, "results_per_page": 10},
-            "is_searching": False
+            "is_searching": False,
+            "favorites": []  # Новый ключ для хранения избранных элементов
         }
     if user_data[chat_id]["is_searching"]:
         user_data[chat_id]["history"].append(query)
         if len(user_data[chat_id]["history"]) > 10:
             user_data[chat_id]["history"] = user_data[chat_id]["history"][-10:]
-
 
 def create_start_keyboard():
     return ReplyKeyboardMarkup(
@@ -46,18 +44,17 @@ def create_start_keyboard():
         resize_keyboard=True
     )
 
-
 def create_main_menu():
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="🎥 Видео на Rutube"), KeyboardButton(text="🎵 Музыка на Bandcamp")],
-            [KeyboardButton(text="⭐ Избранное"), KeyboardButton(text="⚙️ Настройки")],
+            [KeyboardButton(text="⚙️ Настройки")],
             [KeyboardButton(text="📜 История"), KeyboardButton(text="❌ Очистить историю")],
-            [KeyboardButton(text="ℹ️ Помощь"), KeyboardButton(text="💰 Донат")]
+            [KeyboardButton(text="⭐ Избранное"), KeyboardButton(text="ℹ️ Помощь")],
+            [KeyboardButton(text="💰 Донат")]
         ],
         resize_keyboard=True
     )
-
 
 @dp.message(Command("start"))
 async def start_bot(message: types.Message):
@@ -70,10 +67,8 @@ async def start_bot(message: types.Message):
         reply_markup=create_start_keyboard()
     )
 
-
 @dp.message(lambda message: message.text == "💰 Донат")
 async def donate_handler(message: types.Message):
-    """Обработчик кнопки '💰 Донат'."""
     await message.answer(
         "Спасибо за поддержку! Вы можете сделать донат по ссылке ниже:",
         reply_markup=InlineKeyboardMarkup(
@@ -81,11 +76,9 @@ async def donate_handler(message: types.Message):
         )
     )
 
-
 @dp.message(lambda message: message.text == "▶️ Начать")
 async def start_search(message: types.Message):
     await message.answer("Выбери, что ты хочешь искать:", reply_markup=create_main_menu())
-
 
 @dp.message(lambda message: message.text in ["🎥 Видео на Rutube", "🎵 Музыка на Bandcamp"])
 async def choose_search_type(message: types.Message):
@@ -96,9 +89,9 @@ async def choose_search_type(message: types.Message):
             "results": [],
             "index": 0,
             "type": None,
-            "favorites": [],
             "settings": {"default_platform": None, "results_per_page": 10},
-            "is_searching": True
+            "is_searching": True,
+            "favorites": []
         }
     else:
         user_data[chat_id]["is_searching"] = True
@@ -108,7 +101,6 @@ async def choose_search_type(message: types.Message):
         reply_markup=ReplyKeyboardMarkup(keyboard=[[KeyboardButton(text="🏠 Главное меню")]], resize_keyboard=True)
     )
 
-
 @dp.message()
 async def process_query(message: types.Message):
     chat_id = message.chat.id
@@ -116,8 +108,8 @@ async def process_query(message: types.Message):
 
     # Проверяем, является ли сообщение одной из команд главного меню
     if query in [
-        "🎥 Видео на Rutube", "🎵 Музыка на Bandcamp", "⭐ Избранное", "⚙️ Настройки",
-        "📜 История", "❌ Очистить историю", "ℹ️ Помощь", "💰 Донат", "🏠 Главное меню"
+        "🎥 Видео на Rutube", "🎵 Музыка на Bandcamp", "⚙️ Настройки",
+        "📜 История", "❌ Очистить историю", "ℹ️ Помощь", "💰 Донат", "🏠 Главное меню", "⭐ Избранное"
     ]:
         await handle_menu_commands(message)
         return
@@ -145,14 +137,10 @@ async def process_query(message: types.Message):
     user_data[chat_id]["index"] = 0
     await show_results(chat_id, message)
 
-
 async def handle_menu_commands(message: types.Message):
     """Обработка команд главного меню."""
     query = message.text.strip()
-
-    if query == "⭐ Избранное":
-        await show_favorites(message)
-    elif query == "⚙️ Настройки":
+    if query == "⚙️ Настройки":
         await settings_handler(message)
     elif query == "📜 История":
         await show_history(message)
@@ -160,13 +148,14 @@ async def handle_menu_commands(message: types.Message):
         await clear_history(message)
     elif query == "ℹ️ Помощь":
         await help_handler(message)
+    elif query == "⭐ Избранное":
+        await show_favorites(message)
     elif query == "💰 Донат":
         await donate_handler(message)
     elif query == "🏠 Главное меню":
         await return_to_menu(message)
     else:
         await message.answer("Неизвестная команда.")
-
 
 async def find_videos(query: str):
     url = f"https://rutube.ru/api/search/video/?query={query}"
@@ -179,7 +168,6 @@ async def find_videos(query: str):
             logger.error(f"Ошибка запроса: {response.status}")
     return []
 
-
 async def find_music(query: str):
     url = f"https://bandcamp.com/search?q={query}"
     headers = {"User-Agent": "Mozilla/5.0"}
@@ -190,7 +178,6 @@ async def find_music(query: str):
                 return [(item.find('div', {'class': 'heading'}).text.strip(), item.find('a')['href']) for item in soup.find_all('li', {'class': 'searchresult'})]
             logger.error(f"Ошибка запроса: {response.status}")
     return []
-
 
 async def show_results(chat_id: int, message: types.Message = None):
     results = user_data[chat_id]["results"]
@@ -209,16 +196,20 @@ async def show_results(chat_id: int, message: types.Message = None):
         text += f"📌 Название: {result[0]}\n🔗 Ссылка: {result[1]}"
         keyboard = InlineKeyboardMarkup(inline_keyboard=[])
 
+        # Проверяем, находится ли элемент в избранном
+        is_favorite = any(fav[1] == result[1] for fav in user_data[chat_id]["favorites"])
+        favorite_button_text = "⭐ Удалить из избранного" if is_favorite else "⭐ Добавить в избранное"
+        favorite_callback_data = f"remove_favorite_{idx - 1}" if is_favorite else f"add_favorite_{idx - 1}"
+
         if user_data[chat_id]["type"] == "video":
             download_link = f"{RUTUBE_DOWNLOAD_SITE}{result[1]}"
             keyboard.inline_keyboard.append([InlineKeyboardButton(text="⬇️ Скачать", url=download_link)])
         elif user_data[chat_id]["type"] == "music":
             keyboard.inline_keyboard.append([InlineKeyboardButton(text="⬇️ Скачать", callback_data=f"download_{idx - 1}")])
 
-        keyboard.inline_keyboard.append([
-            InlineKeyboardButton(text="⭐ В избранное", callback_data=f"add_fav_{idx - 1}"),
-            InlineKeyboardButton(text="❌ Закончить", callback_data="stop")
-        ])
+        # Кнопка для добавления/удаления из избранного
+        keyboard.inline_keyboard.append([InlineKeyboardButton(text=favorite_button_text, callback_data=favorite_callback_data)])
+        keyboard.inline_keyboard.append([InlineKeyboardButton(text="❌ Закончить", callback_data="stop")])
 
         if message:
             await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
@@ -231,12 +222,110 @@ async def show_results(chat_id: int, message: types.Message = None):
             keyboard.inline_keyboard.append([InlineKeyboardButton(text="← Предыдущая", callback_data="prev_page")])
         if current_page < len(pages) - 1:
             keyboard.inline_keyboard.append([InlineKeyboardButton(text="Следующая →", callback_data="next_page")])
-
         if message:
             await message.answer("Для навигации между страницами:", reply_markup=keyboard)
         else:
             await bot.send_message(chat_id, "Для навигации между страницами:", reply_markup=keyboard)
 
+@dp.callback_query(lambda c: c.data.startswith("add_favorite_"))
+async def add_to_favorites(callback: types.CallbackQuery):
+    chat_id = callback.message.chat.id
+    try:
+        index = int(callback.data.split("_")[2])
+    except (ValueError, IndexError):
+        await callback.answer("Ошибка: Неверный формат данных.")
+        return
+
+    if chat_id not in user_data or "results" not in user_data[chat_id]:
+        await callback.answer("Нет доступных результатов для добавления в избранное.")
+        return
+
+    results = user_data[chat_id]["results"]
+    if index < 0 or index >= len(results):
+        await callback.answer("Выбранный результат недоступен.")
+        return
+
+    result = results[index]
+    if not any(fav[1] == result[1] for fav in user_data[chat_id]["favorites"]):
+        user_data[chat_id]["favorites"].append(result)
+        await callback.answer("Добавлено в избранное!")
+    else:
+        await callback.answer("Уже в избранном.")
+
+    # Обновляем клавиатуру
+    await update_keyboard_after_favorite_action(callback, index)
+
+@dp.callback_query(lambda c: c.data.startswith("remove_favorite_"))
+async def remove_from_favorites(callback: types.CallbackQuery):
+    chat_id = callback.message.chat.id
+    try:
+        index = int(callback.data.split("_")[2])
+    except (ValueError, IndexError):
+        await callback.answer("Ошибка: Неверный формат данных.")
+        return
+
+    if chat_id not in user_data or "results" not in user_data[chat_id]:
+        await callback.answer("Нет доступных результатов для удаления из избранного.")
+        return
+
+    results = user_data[chat_id]["results"]
+    if index < 0 or index >= len(results):
+        await callback.answer("Выбранный результат недоступен.")
+        return
+
+    result = results[index]
+    user_data[chat_id]["favorites"] = [fav for fav in user_data[chat_id]["favorites"] if fav[1] != result[1]]
+    await callback.answer("Удалено из избранного!")
+
+    # Обновляем клавиатуру
+    await update_keyboard_after_favorite_action(callback, index)
+
+async def update_keyboard_after_favorite_action(callback: types.CallbackQuery, index: int):
+    """Обновляет клавиатуру после добавления/удаления из избранного."""
+    chat_id = callback.message.chat.id
+    results = user_data[chat_id]["results"]
+    result = results[index]
+
+    text = f"🔍 Результат {index + 1}/{len(results)}\n"
+    text += f"📌 Название: {result[0]}\n🔗 Ссылка: {result[1]}"
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[])
+
+    # Проверяем, находится ли элемент в избранном
+    is_favorite = any(fav[1] == result[1] for fav in user_data[chat_id]["favorites"])
+    favorite_button_text = "⭐ Удалить из избранного" if is_favorite else "⭐ Добавить в избранное"
+    favorite_callback_data = f"remove_favorite_{index}" if is_favorite else f"add_favorite_{index}"
+
+    if user_data[chat_id]["type"] == "video":
+        download_link = f"{RUTUBE_DOWNLOAD_SITE}{result[1]}"
+        keyboard.inline_keyboard.append([InlineKeyboardButton(text="⬇️ Скачать", url=download_link)])
+    elif user_data[chat_id]["type"] == "music":
+        keyboard.inline_keyboard.append([InlineKeyboardButton(text="⬇️ Скачать", callback_data=f"download_{index}")])
+
+    # Кнопка для добавления/удаления из избранного
+    keyboard.inline_keyboard.append([InlineKeyboardButton(text=favorite_button_text, callback_data=favorite_callback_data)])
+    keyboard.inline_keyboard.append([InlineKeyboardButton(text="❌ Закончить", callback_data="stop")])
+
+    # Обновляем сообщение с новой клавиатурой
+    await callback.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
+
+@dp.callback_query(lambda c: c.data == "prev_page")
+async def prev_page(callback: types.CallbackQuery):
+    chat_id = callback.message.chat.id
+    current_page = user_data[chat_id].get("current_page", 0)
+    if current_page > 0:
+        user_data[chat_id]["current_page"] -= 1
+        await show_results(chat_id, callback.message)
+    await callback.answer()
+
+@dp.callback_query(lambda c: c.data == "next_page")
+async def next_page(callback: types.CallbackQuery):
+    chat_id = callback.message.chat.id
+    current_page = user_data[chat_id].get("current_page", 0)
+    pages = [user_data[chat_id]["results"][i:i + user_data[chat_id]["settings"]["results_per_page"]] for i in range(0, len(user_data[chat_id]["results"]), user_data[chat_id]["settings"]["results_per_page"])]
+    if current_page < len(pages) - 1:
+        user_data[chat_id]["current_page"] += 1
+        await show_results(chat_id, callback.message)
+    await callback.answer()
 
 @dp.callback_query(lambda c: c.data.startswith("download_"))
 async def download_file(callback: types.CallbackQuery):
@@ -260,7 +349,6 @@ async def download_file(callback: types.CallbackQuery):
     url = result[1]
     loading_message = await callback.message.answer("⏳ Загрузка файла...")
     file_paths = await download_media(url, chat_id)
-
     if not file_paths:
         await loading_message.edit_text("❌ Не удалось скачать файл.")
         return
@@ -290,7 +378,6 @@ async def download_file(callback: types.CallbackQuery):
 
     await callback.message.edit_reply_markup(reply_markup=None)
 
-
 async def download_media(url: str, chat_id: int):
     try:
         with YoutubeDL({'format': 'bestaudio/best', 'outtmpl': '%(title)s.%(ext)s'}) as ydl:
@@ -302,29 +389,6 @@ async def download_media(url: str, chat_id: int):
         logger.error(f"Ошибка при скачивании: {e}")
         return []
 
-
-@dp.callback_query(lambda c: c.data.startswith("add_fav_"))
-async def add_to_favorites(callback: types.CallbackQuery):
-    chat_id = callback.message.chat.id
-    try:
-        index = int(callback.data.split("_")[1])
-    except (ValueError, IndexError):
-        await callback.answer("Ошибка: Неверный формат данных.")
-        return
-
-    if chat_id not in user_data or "results" not in user_data[chat_id]:
-        await callback.answer("Нет доступных результатов для добавления в избранное.")
-        return
-
-    results = user_data[chat_id]["results"]
-    if index < 0 or index >= len(results):
-        await callback.answer("Выбранный результат недоступен для добавления в избранное.")
-        return
-
-    user_data[chat_id]["favorites"].append(results[index])
-    await callback.answer("Добавлено в избранное!")
-
-
 @dp.callback_query(lambda c: c.data == "stop")
 async def stop_search(callback: types.CallbackQuery):
     chat_id = callback.message.chat.id
@@ -332,7 +396,6 @@ async def stop_search(callback: types.CallbackQuery):
     user_data[chat_id]["index"] = 0
     await callback.answer("Поиск завершён.")
     await callback.message.answer("Поиск остановлен. Выберите действие:", reply_markup=create_main_menu())
-
 
 @dp.message(lambda message: message.text == "⚙️ Настройки")
 async def settings_handler(message: types.Message):
@@ -343,11 +406,10 @@ async def settings_handler(message: types.Message):
             "results": [],
             "index": 0,
             "type": None,
-            "favorites": [],
             "settings": {"default_platform": None, "results_per_page": 10},
-            "is_searching": False
+            "is_searching": False,
+            "favorites": []
         }
-
     current_results_per_page = user_data[chat_id]["settings"]["results_per_page"]
     keyboard = InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(text="5 результатов", callback_data="set_results_5")],
@@ -360,7 +422,6 @@ async def settings_handler(message: types.Message):
         reply_markup=keyboard
     )
 
-
 @dp.callback_query(lambda c: c.data.startswith("set_results_"))
 async def set_results_per_page(callback: types.CallbackQuery):
     chat_id = callback.message.chat.id
@@ -369,35 +430,12 @@ async def set_results_per_page(callback: types.CallbackQuery):
     await callback.answer(f"Установлено {results_per_page} результатов на странице.")
     await callback.message.edit_text("Настройки обновлены.", reply_markup=None)
 
-
 @dp.message(lambda message: message.text == "🏠 Главное меню")
 async def return_to_menu(message: types.Message):
     chat_id = message.chat.id
     if chat_id in user_data:
         user_data[chat_id]["is_searching"] = False
     await message.answer("Вы вернулись в главное меню.", reply_markup=create_main_menu())
-
-
-@dp.message(lambda message: message.text == "⭐ Избранное")
-async def show_favorites(message: types.Message):
-    chat_id = message.chat.id
-    if not user_data.get(chat_id, {}).get("favorites"):
-        await message.answer("В избранном пока ничего нет.")
-        return
-
-    builder = InlineKeyboardBuilder()
-    for idx, item in enumerate(user_data[chat_id]["favorites"], 1):
-        builder.add(InlineKeyboardButton(text=f"⭐ {idx}", callback_data=f"fav_{idx}"))
-    builder.adjust(2)
-    await message.answer("Ваше избранное:", reply_markup=builder.as_markup())
-
-
-@dp.callback_query(lambda c: c.data.startswith("fav_"))
-async def show_favorite_item(callback: types.CallbackQuery):
-    index = int(callback.data.split("_")[1]) - 1
-    item = user_data[callback.message.chat.id]["favorites"][index]
-    await callback.message.answer(f"⭐ Избранное:\n{item[0]}\n{item[1]}")
-
 
 @dp.message(lambda message: message.text == "📜 История")
 async def show_history(message: types.Message):
@@ -408,7 +446,6 @@ async def show_history(message: types.Message):
     else:
         await message.answer("История запросов пуста.")
 
-
 @dp.message(lambda message: message.text == "❌ Очистить историю")
 async def clear_history(message: types.Message):
     chat_id = message.chat.id
@@ -418,25 +455,49 @@ async def clear_history(message: types.Message):
     else:
         await message.answer("История запросов уже пуста.", reply_markup=create_main_menu())
 
-
 @dp.message(lambda message: message.text == "ℹ️ Помощь")
 async def help_handler(message: types.Message):
-    """Обработчик кнопки 'ℹ️ Помощь'."""
     help_text = (
         "Это бот для поиска видео и музыки.\n\n"
         "Доступные команды:\n"
         "▶️ Начать - начать новый поиск\n"
         "🎥 Видео на Rutube - поиск видео на Rutube\n"
         "🎵 Музыка на Bandcamp - поиск музыки на Bandcamp\n"
-        "⭐ Избранное - показать избранные результаты\n"
         "⚙️ Настройки - изменить настройки бота\n"
         "📜 История - показать историю запросов\n"
         "❌ Очистить историю - очистить историю запросов\n"
+        "⭐ Избранное - показать избранные элементы\n"
         "ℹ️ Помощь - показать это сообщение\n"
         "💰 Донат - поддержать разработчика"
     )
     await message.answer(help_text)
 
+@dp.message(lambda message: message.text == "⭐ Избранное")
+async def show_favorites(message: types.Message):
+    chat_id = message.chat.id
+    if chat_id not in user_data:
+        user_data[chat_id] = {
+            "history": [],
+            "results": [],
+            "index": 0,
+            "type": None,
+            "settings": {"default_platform": None, "results_per_page": 10},
+            "is_searching": False,
+            "favorites": []
+        }
+
+    favorites = user_data[chat_id]["favorites"]
+    if not favorites:
+        await message.answer("Ваш список избранных пуст.")
+        return
+
+    for idx, fav in enumerate(favorites, start=1):
+        text = f"⭐ Избранный элемент {idx}\n"
+        text += f"📌 Название: {fav[0]}\n🔗 Ссылка: {fav[1]}"
+        keyboard = InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="❌ Удалить из избранного", callback_data=f"remove_favorite_{idx - 1}")]
+        ])
+        await message.answer(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
 
 async def run_bot():
     try:
@@ -444,7 +505,6 @@ async def run_bot():
         await dp.start_polling(bot)
     except Exception as e:
         logger.error(f"Ошибка: {e}")
-
 
 if __name__ == '__main__':
     asyncio.run(run_bot())
