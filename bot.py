@@ -10,6 +10,8 @@ import asyncio
 import os
 from yt_dlp import YoutubeDL
 from pathlib import Path
+import tempfile
+import shutil
 
 # Настройка логирования
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -19,6 +21,7 @@ BOT_TOKEN = 'ваш_токен'
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 user_data = {}
+active_downloads = {}
 DONATE_URL = "https://www.donationalerts.com/r/black_h0le_d"
 RUTUBE_DOWNLOAD_SITE = "https://cobalt.tools/?url="
 
@@ -31,7 +34,7 @@ def save_user_query(chat_id: int, query: str):
             "type": None,
             "settings": {"default_platform": None, "results_per_page": 10},
             "is_searching": False,
-            "favorites": []  # Новый ключ для хранения избранных элементов
+            "favorites": []
         }
     if user_data[chat_id]["is_searching"]:
         user_data[chat_id]["history"].append(query)
@@ -106,7 +109,6 @@ async def process_query(message: types.Message):
     chat_id = message.chat.id
     query = message.text.strip()
 
-    # Проверяем, является ли сообщение одной из команд главного меню
     if query in [
         "🎥 Видео на Rutube", "🎵 Музыка на Bandcamp", "⚙️ Настройки",
         "📜 История", "❌ Очистить историю", "ℹ️ Помощь", "💰 Донат", "🏠 Главное меню", "⭐ Избранное"
@@ -114,16 +116,13 @@ async def process_query(message: types.Message):
         await handle_menu_commands(message)
         return
 
-    # Если пользователь еще не выбрал тип поиска
     if chat_id not in user_data or not user_data[chat_id]["type"]:
         await message.answer("Сначала выбери тип поиска.", reply_markup=create_main_menu())
         return
 
-    # Сохраняем запрос пользователя
     if user_data[chat_id]["is_searching"]:
         save_user_query(chat_id, query)
 
-    # Выполняем поиск в зависимости от типа
     if user_data[chat_id]["type"] == "video":
         results = await find_videos(query)
     elif user_data[chat_id]["type"] == "music":
@@ -138,7 +137,6 @@ async def process_query(message: types.Message):
     await show_results(chat_id, message)
 
 async def handle_menu_commands(message: types.Message):
-    """Обработка команд главного меню."""
     query = message.text.strip()
     if query == "⚙️ Настройки":
         await settings_handler(message)
@@ -154,8 +152,6 @@ async def handle_menu_commands(message: types.Message):
         await donate_handler(message)
     elif query == "🏠 Главное меню":
         await return_to_menu(message)
-    else:
-        await message.answer("Неизвестная команда.")
 
 async def find_videos(query: str):
     url = f"https://rutube.ru/api/search/video/?query={query}"
@@ -196,18 +192,18 @@ async def show_results(chat_id: int, message: types.Message = None):
         text += f"📌 Название: {result[0]}\n🔗 Ссылка: {result[1]}"
         keyboard = InlineKeyboardMarkup(inline_keyboard=[])
 
-        # Проверяем, находится ли элемент в избранном
         is_favorite = any(fav[1] == result[1] for fav in user_data[chat_id]["favorites"])
         favorite_button_text = "⭐ Удалить из избранного" if is_favorite else "⭐ Добавить в избранное"
         favorite_callback_data = f"remove_favorite_{idx - 1}" if is_favorite else f"add_favorite_{idx - 1}"
 
         if user_data[chat_id]["type"] == "video":
-            download_link = f"{RUTUBE_DOWNLOAD_SITE}{result[1]}"
-            keyboard.inline_keyboard.append([InlineKeyboardButton(text="⬇️ Скачать", url=download_link)])
+            video_link = result[1]  # Исходная ссылка на видео (например, https://rutube.ru/video/...)
+            keyboard.inline_keyboard.append([
+                InlineKeyboardButton(text="Копировать ссылку", callback_data=f"copy_link_{idx - 1}")
+            ])
         elif user_data[chat_id]["type"] == "music":
             keyboard.inline_keyboard.append([InlineKeyboardButton(text="⬇️ Скачать", callback_data=f"download_{idx - 1}")])
 
-        # Кнопка для добавления/удаления из избранного
         keyboard.inline_keyboard.append([InlineKeyboardButton(text=favorite_button_text, callback_data=favorite_callback_data)])
         keyboard.inline_keyboard.append([InlineKeyboardButton(text="❌ Закончить", callback_data="stop")])
 
@@ -226,6 +222,43 @@ async def show_results(chat_id: int, message: types.Message = None):
             await message.answer("Для навигации между страницами:", reply_markup=keyboard)
         else:
             await bot.send_message(chat_id, "Для навигации между страницами:", reply_markup=keyboard)
+
+@dp.callback_query(lambda c: c.data.startswith("copy_link_"))
+async def copy_download_link(callback: types.CallbackQuery):
+    chat_id = callback.message.chat.id
+    try:
+        index = int(callback.data.split("_")[2])
+    except (ValueError, IndexError):
+        await callback.answer("Ошибка: Неверный формат данных.")
+        return
+
+    if chat_id not in user_data or "results" not in user_data[chat_id]:
+        await callback.answer("Нет доступных результатов.")
+        return
+
+    results = user_data[chat_id]["results"]
+    if index < 0 or index >= len(results):
+        await callback.answer("Выбранный результат недоступен.")
+        return
+
+    result = results[index]
+    video_link = result[1]  # Исходная ссылка на видео (например, https://rutube.ru/video/...)
+    download_link = f"{RUTUBE_DOWNLOAD_SITE}{video_link}"  # Ссылка на cobalt.tools
+    
+    # Создаем клавиатуру с кнопкой "Перейти к скачиванию"
+    download_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="Перейти к скачиванию", url=download_link)]
+    ])
+    
+    # Отправляем ссылки в чат с кнопкой, как на скриншоте
+    await bot.send_message(
+        chat_id,
+        f"Ссылка на видео:\n`{video_link}`\n"
+        f"Скопируйте эту ссылку вручную (нажмите и удерживайте).",
+        parse_mode=ParseMode.MARKDOWN,
+        reply_markup=download_keyboard
+    )
+    await callback.answer("Ссылка отправлена в чат! Скопируйте её вручную или нажмите 'Перейти к скачиванию'.")
 
 @dp.callback_query(lambda c: c.data.startswith("add_favorite_"))
 async def add_to_favorites(callback: types.CallbackQuery):
@@ -251,8 +284,6 @@ async def add_to_favorites(callback: types.CallbackQuery):
         await callback.answer("Добавлено в избранное!")
     else:
         await callback.answer("Уже в избранном.")
-
-    # Обновляем клавиатуру
     await update_keyboard_after_favorite_action(callback, index)
 
 @dp.callback_query(lambda c: c.data.startswith("remove_favorite_"))
@@ -276,12 +307,9 @@ async def remove_from_favorites(callback: types.CallbackQuery):
     result = results[index]
     user_data[chat_id]["favorites"] = [fav for fav in user_data[chat_id]["favorites"] if fav[1] != result[1]]
     await callback.answer("Удалено из избранного!")
-
-    # Обновляем клавиатуру
     await update_keyboard_after_favorite_action(callback, index)
 
 async def update_keyboard_after_favorite_action(callback: types.CallbackQuery, index: int):
-    """Обновляет клавиатуру после добавления/удаления из избранного."""
     chat_id = callback.message.chat.id
     results = user_data[chat_id]["results"]
     result = results[index]
@@ -290,22 +318,21 @@ async def update_keyboard_after_favorite_action(callback: types.CallbackQuery, i
     text += f"📌 Название: {result[0]}\n🔗 Ссылка: {result[1]}"
     keyboard = InlineKeyboardMarkup(inline_keyboard=[])
 
-    # Проверяем, находится ли элемент в избранном
     is_favorite = any(fav[1] == result[1] for fav in user_data[chat_id]["favorites"])
     favorite_button_text = "⭐ Удалить из избранного" if is_favorite else "⭐ Добавить в избранное"
     favorite_callback_data = f"remove_favorite_{index}" if is_favorite else f"add_favorite_{index}"
 
     if user_data[chat_id]["type"] == "video":
-        download_link = f"{RUTUBE_DOWNLOAD_SITE}{result[1]}"
-        keyboard.inline_keyboard.append([InlineKeyboardButton(text="⬇️ Скачать", url=download_link)])
+        video_link = result[1]  # Исходная ссылка на видео
+        keyboard.inline_keyboard.append([
+            InlineKeyboardButton(text="Копировать ссылку", callback_data=f"copy_link_{index}")
+        ])
     elif user_data[chat_id]["type"] == "music":
         keyboard.inline_keyboard.append([InlineKeyboardButton(text="⬇️ Скачать", callback_data=f"download_{index}")])
 
-    # Кнопка для добавления/удаления из избранного
     keyboard.inline_keyboard.append([InlineKeyboardButton(text=favorite_button_text, callback_data=favorite_callback_data)])
     keyboard.inline_keyboard.append([InlineKeyboardButton(text="❌ Закончить", callback_data="stop")])
 
-    # Обновляем сообщение с новой клавиатурой
     await callback.message.edit_text(text, parse_mode=ParseMode.HTML, reply_markup=keyboard)
 
 @dp.callback_query(lambda c: c.data == "prev_page")
@@ -347,13 +374,41 @@ async def download_file(callback: types.CallbackQuery):
 
     result = results[index]
     url = result[1]
-    loading_message = await callback.message.answer("⏳ Загрузка файла...")
-    file_paths = await download_media(url, chat_id)
-    if not file_paths:
-        await loading_message.edit_text("❌ Не удалось скачать файл.")
-        return
-
+    
+    cancel_keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="❌ Отменить загрузку", callback_data=f"cancel_download_{chat_id}")]
+    ])
+    
+    loading_message = await callback.message.answer(
+        "⏳ Загрузка файла началась...",
+        reply_markup=cancel_keyboard
+    )
+    
+    temp_dir = tempfile.mkdtemp()
+    
+    download_task = asyncio.create_task(
+        asyncio.to_thread(download_media, url, chat_id, temp_dir)
+    )
+    active_downloads[chat_id] = {
+        "task": download_task,
+        "message_id": loading_message.message_id,
+        "cancelled": False,
+        "temp_dir": temp_dir
+    }
+    
     try:
+        file_paths = await download_task
+        if active_downloads.get(chat_id, {}).get("cancelled", False):
+            return
+            
+        if not file_paths:
+            await bot.edit_message_text(
+                "❌ Не удалось скачать файл.",
+                chat_id=chat_id,
+                message_id=loading_message.message_id
+            )
+            return
+
         for file_path in file_paths:
             file_size = os.path.getsize(file_path)
             if file_size > 50 * 1024 * 1024:
@@ -367,27 +422,86 @@ async def download_file(callback: types.CallbackQuery):
                     document = FSInputFile(file_path)
                     await bot.send_document(chat_id, document=document, caption="Загруженный файл")
             await asyncio.sleep(1)
-        await loading_message.edit_text("✅ Все файлы успешно загружены!")
+            
+        await bot.edit_message_text(
+            "✅ Все файлы успешно загружены!",
+            chat_id=chat_id,
+            message_id=loading_message.message_id,
+            reply_markup=None
+        )
+    except asyncio.CancelledError:
+        logger.info(f"Download task cancelled for chat_id {chat_id}")
+        return
     except Exception as e:
         logger.error(f"Ошибка при отправке файла: {e}")
         await callback.message.answer(f"Произошла ошибка: {str(e)}")
     finally:
-        for file_path in file_paths:
-            if os.path.exists(file_path):
-                os.remove(file_path)
+        if chat_id in active_downloads:
+            try:
+                shutil.rmtree(active_downloads[chat_id]["temp_dir"])
+            except:
+                pass
+            del active_downloads[chat_id]
+        else:
+            try:
+                shutil.rmtree(temp_dir)
+            except:
+                pass
 
     await callback.message.edit_reply_markup(reply_markup=None)
 
-async def download_media(url: str, chat_id: int):
+@dp.callback_query(lambda c: c.data.startswith("cancel_download_"))
+async def cancel_download(callback: types.CallbackQuery):
+    chat_id = callback.message.chat.id
+    if chat_id in active_downloads:
+        active_downloads[chat_id]["cancelled"] = True
+        active_downloads[chat_id]["task"].cancel()
+        
+        await bot.edit_message_text(
+            "❌ Загрузка отменена",
+            chat_id=chat_id,
+            message_id=active_downloads[chat_id]["message_id"],
+            reply_markup=None
+        )
+        
+        await bot.send_message(
+            chat_id,
+            "Вы вернулись в главное меню.",
+            reply_markup=create_main_menu()
+        )
+        
+        try:
+            shutil.rmtree(active_downloads[chat_id]["temp_dir"])
+        except Exception as e:
+            logger.error(f"Ошибка при удалении временной директории: {e}")
+            
+        del active_downloads[chat_id]
+    else:
+        await callback.answer("Нет активной загрузки для отмены")
+    await callback.answer()
+
+def download_media(url: str, chat_id: int, temp_dir: str):
     try:
-        with YoutubeDL({'format': 'bestaudio/best', 'outtmpl': '%(title)s.%(ext)s'}) as ydl:
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
+            'progress_hooks': [lambda d: check_cancel(d, chat_id)],
+            'noplaylist': True,
+        }
+        with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
-            directory = Path.cwd()
-            downloaded_files = [str(file) for file in directory.iterdir() if file.is_file() and file.stat().st_ctime > os.path.getctime(__file__)]
+            downloaded_files = [os.path.join(temp_dir, f) for f in os.listdir(temp_dir) if os.path.isfile(os.path.join(temp_dir, f))]
             return downloaded_files
     except Exception as e:
+        if str(e) == "Download cancelled":
+            logger.info(f"Download cancelled for chat_id {chat_id}")
+            return None
         logger.error(f"Ошибка при скачивании: {e}")
         return []
+
+def check_cancel(d, chat_id):
+    if chat_id in active_downloads and active_downloads[chat_id]["cancelled"]:
+        raise Exception("Download cancelled")
 
 @dp.callback_query(lambda c: c.data == "stop")
 async def stop_search(callback: types.CallbackQuery):
