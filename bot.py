@@ -17,7 +17,7 @@ import shutil
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = 'ваш_токен'
+BOT_TOKEN = '8016665117:AAFRJENXHzEiZ05g58TY-7sGUz1Lka4Pvzg'
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 user_data = {}
@@ -197,9 +197,8 @@ async def show_results(chat_id: int, message: types.Message = None):
         favorite_callback_data = f"remove_favorite_{idx - 1}" if is_favorite else f"add_favorite_{idx - 1}"
 
         if user_data[chat_id]["type"] == "video":
-            video_link = result[1]  # Исходная ссылка на видео (например, https://rutube.ru/video/...)
             keyboard.inline_keyboard.append([
-                InlineKeyboardButton(text="Копировать ссылку", callback_data=f"copy_link_{idx - 1}")
+                InlineKeyboardButton(text="⬇️ Скачать видео", callback_data=f"copy_link_{idx - 1}")
             ])
         elif user_data[chat_id]["type"] == "music":
             keyboard.inline_keyboard.append([InlineKeyboardButton(text="⬇️ Скачать", callback_data=f"download_{idx - 1}")])
@@ -242,23 +241,46 @@ async def copy_download_link(callback: types.CallbackQuery):
         return
 
     result = results[index]
-    video_link = result[1]  # Исходная ссылка на видео (например, https://rutube.ru/video/...)
-    download_link = f"{RUTUBE_DOWNLOAD_SITE}{video_link}"  # Ссылка на cobalt.tools
-    
-    # Создаем клавиатуру с кнопкой "Перейти к скачиванию"
-    download_keyboard = InlineKeyboardMarkup(inline_keyboard=[
-        [InlineKeyboardButton(text="Перейти к скачиванию", url=download_link)]
-    ])
-    
-    # Отправляем ссылки в чат с кнопкой, как на скриншоте
-    await bot.send_message(
-        chat_id,
-        f"Ссылка на видео:\n`{video_link}`\n"
-        f"Скопируйте эту ссылку вручную (нажмите и удерживайте).",
-        parse_mode=ParseMode.MARKDOWN,
-        reply_markup=download_keyboard
+    video_link = result[1]  # Оригинальная ссылка на видео
+    cobalt_url = f"{RUTUBE_DOWNLOAD_SITE}{video_link}"  # Ссылка для Cobalt.tools
+
+    # Отправляем сообщение с двумя кнопками
+    await callback.message.answer(
+        "Выберите действие:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=[
+            [InlineKeyboardButton(text="📋 Копировать ссылку на видео", callback_data=f"copy_video_link_{index}")],
+            [InlineKeyboardButton(text="📥 Перейти на Cobalt.tools", url=cobalt_url)]
+        ])
     )
-    await callback.answer("Ссылка отправлена в чат! Скопируйте её вручную или нажмите 'Перейти к скачиванию'.")
+    await callback.answer("Готово!")
+
+@dp.callback_query(lambda c: c.data.startswith("copy_video_link_"))
+async def copy_video_link(callback: types.CallbackQuery):
+    chat_id = callback.message.chat.id
+    try:
+        index = int(callback.data.split("_")[3])
+    except (ValueError, IndexError):
+        await callback.answer("Ошибка: Неверный формат данных.")
+        return
+
+    if chat_id not in user_data or "results" not in user_data[chat_id]:
+        await callback.answer("Нет доступных результатов.")
+        return
+
+    results = user_data[chat_id]["results"]
+    if index < 0 or index >= len(results):
+        await callback.answer("Выбранный результат недоступен.")
+        return
+
+    result = results[index]
+    video_link = result[1]  # Оригинальная ссылка на видео
+
+    # Отправляем оригинальную ссылку для копирования
+    await callback.message.answer(
+        f"Скопируйте эту ссылку на видео:\n```\n{video_link}\n```",
+        parse_mode=ParseMode.MARKDOWN
+    )
+    await callback.answer("Теперь выделите и скопируйте ссылку!")
 
 @dp.callback_query(lambda c: c.data.startswith("add_favorite_"))
 async def add_to_favorites(callback: types.CallbackQuery):
@@ -323,9 +345,8 @@ async def update_keyboard_after_favorite_action(callback: types.CallbackQuery, i
     favorite_callback_data = f"remove_favorite_{index}" if is_favorite else f"add_favorite_{index}"
 
     if user_data[chat_id]["type"] == "video":
-        video_link = result[1]  # Исходная ссылка на видео
         keyboard.inline_keyboard.append([
-            InlineKeyboardButton(text="Копировать ссылку", callback_data=f"copy_link_{index}")
+            InlineKeyboardButton(text="⬇️ Скачать видео", callback_data=f"copy_link_{index}")
         ])
     elif user_data[chat_id]["type"] == "music":
         keyboard.inline_keyboard.append([InlineKeyboardButton(text="⬇️ Скачать", callback_data=f"download_{index}")])
@@ -480,14 +501,15 @@ async def cancel_download(callback: types.CallbackQuery):
         await callback.answer("Нет активной загрузки для отмены")
     await callback.answer()
 
-def download_media(url: str, chat_id: int, temp_dir: str):
+def download_media(url: str, chat_id: int, temp_dir: str, ydl_opts: dict = None):
     try:
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
-            'progress_hooks': [lambda d: check_cancel(d, chat_id)],
-            'noplaylist': True,
-        }
+        if ydl_opts is None:
+            ydl_opts = {
+                'format': 'bestaudio/best',
+                'outtmpl': os.path.join(temp_dir, '%(title)s.%(ext)s'),
+                'progress_hooks': [lambda d: check_cancel(d, chat_id)],
+                'noplaylist': True,
+            }
         with YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             downloaded_files = [os.path.join(temp_dir, f) for f in os.listdir(temp_dir) if os.path.isfile(os.path.join(temp_dir, f))]
