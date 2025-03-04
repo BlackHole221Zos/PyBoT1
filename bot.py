@@ -17,7 +17,7 @@ import shutil
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
 
-BOT_TOKEN = '8016665117:AAFRJENXHzEiZ05g58TY-7sGUz1Lka4Pvzg'
+BOT_TOKEN = 'ваш_токен'
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 user_data = {}
